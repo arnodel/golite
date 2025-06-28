@@ -54,57 +54,6 @@ func ParseRecord(data []byte) (Record, error) {
 // It returns the parsed Value and the number of bytes consumed from the body.
 func serialTypeToValue(serialType int64, body []byte) (any, int, error) {
 	switch {
-	case serialType == 0: // NULL
-		return SQLNull, 0, nil
-	case serialType == 1: // 8-bit signed int
-		if len(body) < 1 {
-			return nil, 0, fmt.Errorf("insufficient data for 8-bit integer")
-		}
-		return int64(int8(body[0])), 1, nil
-	case serialType == 2: // 16-bit signed int
-		if len(body) < 2 {
-			return nil, 0, fmt.Errorf("insufficient data for 16-bit integer")
-		}
-		return int64(int16(binary.BigEndian.Uint16(body[:2]))), 2, nil
-	case serialType == 3: // 24-bit signed int
-		if len(body) < 3 {
-			return nil, 0, fmt.Errorf("insufficient data for 24-bit integer")
-		}
-		b := make([]byte, 4)
-		if body[0]&0x80 != 0 {
-			b[0] = 0xff
-		}
-		copy(b[1:], body[:3])
-		return int64(int32(binary.BigEndian.Uint32(b))), 3, nil
-	case serialType == 4: // 32-bit signed int
-		if len(body) < 4 {
-			return nil, 0, fmt.Errorf("insufficient data for 32-bit integer")
-		}
-		return int64(int32(binary.BigEndian.Uint32(body[:4]))), 4, nil
-	case serialType == 5: // 48-bit signed int
-		if len(body) < 6 {
-			return nil, 0, fmt.Errorf("insufficient data for 48-bit integer")
-		}
-		b := make([]byte, 8)
-		if body[0]&0x80 != 0 {
-			b[0], b[1] = 0xff, 0xff
-		}
-		copy(b[2:], body[:6])
-		return int64(binary.BigEndian.Uint64(b)), 6, nil
-	case serialType == 6: // 64-bit signed int
-		if len(body) < 8 {
-			return nil, 0, fmt.Errorf("insufficient data for 64-bit integer")
-		}
-		return int64(binary.BigEndian.Uint64(body[:8])), 8, nil
-	case serialType == 7: // 64-bit float
-		if len(body) < 8 {
-			return nil, 0, fmt.Errorf("insufficient data for 64-bit float")
-		}
-		return math.Float64frombits(binary.BigEndian.Uint64(body[:8])), 8, nil
-	case serialType == 8: // Constant 0
-		return int64(0), 0, nil
-	case serialType == 9: // Constant 1
-		return int64(1), 0, nil
 	case serialType >= 12 && serialType%2 == 0: // BLOB
 		length := int((serialType - 12) / 2)
 		if len(body) < length {
@@ -117,6 +66,60 @@ func serialTypeToValue(serialType int64, body []byte) (any, int, error) {
 			return nil, 0, fmt.Errorf("insufficient data for TEXT of length %d", length)
 		}
 		return string(body[:length]), length, nil
+	}
+
+	switch serialType {
+	case 0: // NULL
+		return SQLNull, 0, nil
+	case 1: // 8-bit signed int
+		if len(body) < 1 {
+			return nil, 0, fmt.Errorf("insufficient data for 8-bit integer")
+		}
+		return int64(int8(body[0])), 1, nil
+	case 2: // 16-bit signed int
+		if len(body) < 2 {
+			return nil, 0, fmt.Errorf("insufficient data for 16-bit integer")
+		}
+		return int64(int16(binary.BigEndian.Uint16(body[:2]))), 2, nil
+	case 3: // 24-bit signed int
+		if len(body) < 3 {
+			return nil, 0, fmt.Errorf("insufficient data for 24-bit integer")
+		}
+		b := make([]byte, 4)
+		if body[0]&0x80 != 0 {
+			b[0] = 0xff
+		}
+		copy(b[1:], body[:3])
+		return int64(int32(binary.BigEndian.Uint32(b))), 3, nil
+	case 4: // 32-bit signed int
+		if len(body) < 4 {
+			return nil, 0, fmt.Errorf("insufficient data for 32-bit integer")
+		}
+		return int64(int32(binary.BigEndian.Uint32(body[:4]))), 4, nil
+	case 5: // 48-bit signed int
+		if len(body) < 6 {
+			return nil, 0, fmt.Errorf("insufficient data for 48-bit integer")
+		}
+		b := make([]byte, 8)
+		if body[0]&0x80 != 0 {
+			b[0], b[1] = 0xff, 0xff
+		}
+		copy(b[2:], body[:6])
+		return int64(binary.BigEndian.Uint64(b)), 6, nil
+	case 6: // 64-bit signed int
+		if len(body) < 8 {
+			return nil, 0, fmt.Errorf("insufficient data for 64-bit integer")
+		}
+		return int64(binary.BigEndian.Uint64(body[:8])), 8, nil
+	case 7: // 64-bit float
+		if len(body) < 8 {
+			return nil, 0, fmt.Errorf("insufficient data for 64-bit float")
+		}
+		return math.Float64frombits(binary.BigEndian.Uint64(body[:8])), 8, nil
+	case 8: // Constant 0
+		return int64(0), 0, nil
+	case 9: // Constant 1
+		return int64(1), 0, nil
 	default: // Reserved or unused
 		return nil, 0, fmt.Errorf("unsupported serial type %d", serialType)
 	}
