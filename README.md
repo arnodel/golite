@@ -28,7 +28,7 @@ The repository has just been created, and work is beginning based on the roadmap
 
 This roadmap outlines the planned development steps to reach version 1.0.
 
--   [ ] **1. Parse File Header:** Read and parse the 100-byte database header to identify the file as a valid SQLite database and retrieve key metadata.
+-   [x] **1. Parse File Header:** Read and parse the 100-byte database header to identify the file as a valid SQLite database and retrieve key metadata.
 -   [ ] **2. Navigate B-Tree Pages:** Implement the core logic for reading pages and navigating the B-tree data structure that SQLite uses for tables and indexes.
 -   [ ] **3. Read Schema Table:** Use the B-tree logic to find and parse the `sqlite_schema` table, which contains the definitions for all other tables, indexes, and views.
 -   [ ] **4. Read Table Records:** Implement logic to parse raw record data from table pages into structured Go types.
