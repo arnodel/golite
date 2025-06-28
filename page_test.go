@@ -1,28 +1,21 @@
 package golite
 
 import (
-	"os"
 	"testing"
 )
 
 func TestParsePage(t *testing.T) {
 	t.Run("parse page 1 header and record", func(t *testing.T) {
 		dbPath := createTestDB(t, "page_test.sqlite")
-		data, err := os.ReadFile(dbPath)
+		db, err := Open(dbPath)
 		if err != nil {
-			t.Fatalf("failed to read test database file: %v", err)
+			t.Fatalf("Open() failed with error: %v", err)
 		}
+		defer db.Close()
 
-		// For this test, we only need the file header to get the page size.
-		fileHeader, err := ParseHeader(data[:HeaderSize])
+		page, err := db.ReadPage(1)
 		if err != nil {
-			t.Fatalf("failed to parse file header: %v", err)
-		}
-
-		page1Data := data[:fileHeader.PageSize]
-		page, err := ParsePage(page1Data, 1)
-		if err != nil {
-			t.Fatalf("ParsePage() failed with error: %v", err)
+			t.Fatalf("ReadPage(1) failed with error: %v", err)
 		}
 
 		if page.Type != PageTypeLeafTable {
