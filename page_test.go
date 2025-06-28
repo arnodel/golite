@@ -6,7 +6,7 @@ import (
 )
 
 func TestParsePage(t *testing.T) {
-	t.Run("parse page 1 header and cells", func(t *testing.T) {
+	t.Run("parse page 1 header and record", func(t *testing.T) {
 		dbPath := createTestDB(t, "page_test.sqlite")
 		data, err := os.ReadFile(dbPath)
 		if err != nil {
@@ -50,6 +50,33 @@ func TestParsePage(t *testing.T) {
 
 		if cell.PayloadSize <= 0 {
 			t.Errorf("expected cell payload size to be positive, but got %d", cell.PayloadSize)
+		}
+
+		// The sqlite_schema table has 5 columns: type, name, tbl_name, rootpage, sql.
+		// We can verify the contents of the record for our 'test' table.
+		if len(cell.Record) != 5 {
+			t.Fatalf("expected schema record to have 5 columns, got %d", len(cell.Record))
+		}
+
+		// Column 0: type (TEXT)
+		if val, ok := cell.Record[0].(string); !ok || val != "table" {
+			t.Errorf("expected schema col 0 (type) to be 'table', got %v", cell.Record[0])
+		}
+
+		// Column 1: name (TEXT)
+		if val, ok := cell.Record[1].(string); !ok || val != "test" {
+			t.Errorf("expected schema col 1 (name) to be 'test', got %v", cell.Record[1])
+		}
+
+		// Column 3: rootpage (INTEGER). The new table is on page 2.
+		if val, ok := cell.Record[3].(int64); !ok || val != 2 {
+			t.Errorf("expected schema col 3 (rootpage) to be 2, got %v", cell.Record[3])
+		}
+
+		// Column 4: sql (TEXT)
+		expectedSQL := "CREATE TABLE test(id INTEGER, name TEXT)"
+		if val, ok := cell.Record[4].(string); !ok || val != expectedSQL {
+			t.Errorf("expected schema col 4 (sql) to be %q, got %q", expectedSQL, val)
 		}
 	})
 }

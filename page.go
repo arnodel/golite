@@ -2,6 +2,7 @@ package golite
 
 import (
 	"encoding/binary"
+	"fmt"
 )
 
 const (
@@ -20,6 +21,7 @@ const (
 type LeafTableCell struct {
 	PayloadSize int64
 	RowID       int64
+	Record      Record
 }
 
 // Page represents a single page from the SQLite database file.
@@ -73,13 +75,21 @@ func ParsePage(data []byte, pageNum int) (*Page, error) {
 	if p.Type == PageTypeLeafTable {
 		p.Cells = make([]LeafTableCell, p.CellCount)
 		for i, cellOffset := range p.CellPointers {
-			cellData := data[cellOffset:]
+			cellData := data[int(cellOffset):]
 			payloadSize, n := readVarint(cellData)
-			rowID, _ := readVarint(cellData[n:])
+			rowID, m := readVarint(cellData[n:])
+
+			payloadOffset := n + m
+			payload := cellData[payloadOffset : payloadOffset+int(payloadSize)]
+			record, err := ParseRecord(payload)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse record in cell %d on page %d: %w", i, pageNum, err)
+			}
 
 			p.Cells[i] = LeafTableCell{
 				PayloadSize: payloadSize,
 				RowID:       rowID,
+				Record:      record,
 			}
 		}
 	}
@@ -94,6 +104,9 @@ func readVarint(data []byte) (int64, int) {
 	var bytesRead int
 
 	for i := 0; i < 9; i++ {
+		if i >= len(data) {
+			break
+		}
 		bytesRead++
 		b := data[i]
 		if i == 8 {
