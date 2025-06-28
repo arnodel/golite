@@ -79,38 +79,40 @@ func ParsePage(data []byte, pageNum int) (*Page, error) {
 		p.CellPointers[i] = binary.BigEndian.Uint16(data[pointerOffset : pointerOffset+2])
 	}
 
-	// Parse the cells themselves. For now, we only handle leaf table cells.
-	if p.Type == PageTypeLeafTable {
+	// Parse the cells themselves based on the page type.
+	switch p.Type {
+	case PageTypeLeafTable:
 		p.LeafCells = make([]LeafTableCell, p.CellCount)
 		for i, cellOffset := range p.CellPointers {
 			cellData := data[int(cellOffset):]
 			payloadSize, n := readVarint(cellData)
 			rowID, m := readVarint(cellData[n:])
-
 			payloadOffset := n + m
 			payload := cellData[payloadOffset : payloadOffset+int(payloadSize)]
 			record, err := ParseRecord(payload)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse record in cell %d on page %d: %w", i, pageNum, err)
 			}
-
 			p.LeafCells[i] = LeafTableCell{
 				PayloadSize: payloadSize,
 				RowID:       rowID,
 				Record:      record,
 			}
 		}
-	} else if p.Type == PageTypeInteriorTable {
+	case PageTypeInteriorTable:
 		p.InteriorCells = make([]InteriorTableCell, p.CellCount)
 		for i, cellOffset := range p.CellPointers {
 			cellData := data[int(cellOffset):]
 			leftChildPageNum := binary.BigEndian.Uint32(cellData[0:4])
 			key, _ := readVarint(cellData[4:])
+
 			p.InteriorCells[i] = InteriorTableCell{
 				LeftChildPageNum: leftChildPageNum,
 				Key:              key,
 			}
 		}
+	case PageTypeLeafIndex, PageTypeInteriorIndex:
+		// Index pages are not yet supported.
 	}
 
 	return p, nil
