@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"iter"
 	"os"
+	"strings"
 )
 
 // Database represents an open SQLite database file.
@@ -56,9 +57,8 @@ func (db *Database) ReadPage(pageNum int) (*Page, error) {
 }
 
 // Find searches for a record with a specific rowID within a table's B-Tree.
-// It starts the search from the given rootPageNum.
-func (db *Database) Find(rootPageNum int, rowID int64) (Record, error) {
-	pageNum := rootPageNum
+func (db *Database) Find(table TableInfo, rowID int64) (Record, error) {
+	pageNum := table.RootPage
 	for {
 		page, err := db.ReadPage(pageNum)
 		if err != nil {
@@ -70,7 +70,11 @@ func (db *Database) Find(rootPageNum int, rowID int64) (Record, error) {
 			// We've reached a leaf page, search for the rowID here.
 			for _, cell := range page.LeafCells {
 				if cell.RowID == rowID {
-					return cell.Record, nil
+					record := cell.Record
+					if table.RowIDColumnIndex != -1 && len(record) > table.RowIDColumnIndex {
+						record[table.RowIDColumnIndex] = cell.RowID
+					}
+					return record, nil
 				}
 			}
 			// If we've searched the whole leaf page and not found it.
@@ -96,17 +100,17 @@ func (db *Database) Find(rootPageNum int, rowID int64) (Record, error) {
 }
 
 // Scan returns an iterator over all records in a table.
-// The scan starts from the given rootPageNum. The iterator can be used with a for...range loop.
+// The iterator can be used with a for...range loop.
 // Note: This API requires Go 1.22+ with GOEXPERIMENT=rangefunc, or Go 1.23+.
-func (db *Database) Scan(rootPageNum int) iter.Seq2[Record, error] {
+func (db *Database) Scan(table TableInfo) iter.Seq2[Record, error] {
 	return func(yield func(Record, error) bool) {
-		db.scanPage(rootPageNum, yield)
+		db.scanPage(table.RootPage, table, yield)
 	}
 }
 
 // scanPage is the recursive helper for Scan. It traverses the B-Tree in-order.
 // It returns true to continue scanning, or false to stop.
-func (db *Database) scanPage(pageNum int, yield func(Record, error) bool) bool {
+func (db *Database) scanPage(pageNum int, table TableInfo, yield func(Record, error) bool) bool {
 	page, err := db.ReadPage(pageNum)
 	if err != nil {
 		return yield(nil, err)
@@ -115,7 +119,11 @@ func (db *Database) scanPage(pageNum int, yield func(Record, error) bool) bool {
 	switch page.Type {
 	case PageTypeLeafTable:
 		for _, cell := range page.LeafCells {
-			if !yield(cell.Record, nil) {
+			record := cell.Record
+			if table.RowIDColumnIndex != -1 && len(record) > table.RowIDColumnIndex {
+				record[table.RowIDColumnIndex] = cell.RowID
+			}
+			if !yield(record, nil) {
 				return false // Stop scan
 			}
 		}
@@ -123,12 +131,91 @@ func (db *Database) scanPage(pageNum int, yield func(Record, error) bool) bool {
 
 	case PageTypeInteriorTable:
 		for _, cell := range page.InteriorCells {
-			if !db.scanPage(int(cell.LeftChildPageNum), yield) {
+			if !db.scanPage(int(cell.LeftChildPageNum), table, yield) {
 				return false // Stop scan
 			}
 		}
-		return db.scanPage(int(page.RightMostPtr), yield)
+		return db.scanPage(int(page.RightMostPtr), table, yield)
 	default:
 		return yield(nil, fmt.Errorf("unexpected page type %02x encountered during scan", page.Type))
 	}
+}
+
+// GetSchema reads and parses the entire database schema from the sqlite_schema table.
+func (db *Database) GetSchema() (*Schema, error) {
+	schema := &Schema{
+		Tables: make(map[string]TableInfo),
+	}
+
+	// The schema table is always rooted at page 1.
+	// We create a "bootstrap" TableInfo for the schema table itself to use the Scan method.
+	// The schema table has no INTEGER PRIMARY KEY, so its RowIDColumnIndex is -1.
+	schemaTableInfo := TableInfo{
+		Name:             "sqlite_schema",
+		RootPage:         1,
+		SQL:              "CREATE TABLE sqlite_schema(type text, name text, tbl_name text, rootpage integer, sql text)",
+		RowIDColumnIndex: -1,
+	}
+	schema.Tables[schemaTableInfo.Name] = schemaTableInfo
+
+	for record, err := range db.Scan(schemaTableInfo) {
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan schema table: %w", err)
+		}
+
+		// Schema table format: type, name, tbl_name, rootpage, sql
+		if len(record) < 5 {
+			return nil, fmt.Errorf("malformed schema record: expected at least 5 columns, got %d", len(record))
+		}
+
+		itemType, ok := record[0].(string)
+		if !ok {
+			return nil, fmt.Errorf("malformed schema record: column 0 (type) is not a string")
+		}
+		if itemType != "table" {
+			continue // We only care about tables for now.
+		}
+
+		name, okName := record[1].(string)
+		rootPage, okRootPage := record[3].(int64)
+		sql, okSQL := record[4].(string)
+		if !okName || !okRootPage || !okSQL {
+			return nil, fmt.Errorf("malformed schema record for table %q: one or more columns have an unexpected type", name)
+		}
+
+		rowIndex := findRowIDColumnIndex(sql)
+		schema.Tables[name] = TableInfo{
+			Name:             name,
+			RootPage:         int(rootPage),
+			SQL:              sql,
+			RowIDColumnIndex: rowIndex,
+		}
+	}
+	return schema, nil
+}
+
+// findRowIDColumnIndex performs a simple parse of a CREATE TABLE statement
+// to find the index of the INTEGER PRIMARY KEY column.
+// It returns -1 if no such column is found.
+// NOTE: This is a simplified parser and may not handle all valid SQL syntax,
+// especially complex constraints with nested parentheses.
+func findRowIDColumnIndex(sql string) int {
+	start := strings.Index(sql, "(")
+	if start == -1 {
+		return -1
+	}
+	// We assume the column definitions end at the last parenthesis.
+	// This is fragile but works for simple CREATE TABLE statements.
+	end := strings.LastIndex(sql, ")")
+	if end <= start {
+		return -1
+	}
+
+	defs := strings.Split(sql[start+1:end], ",")
+	for i, def := range defs {
+		if strings.Contains(strings.ToUpper(strings.TrimSpace(def)), "INTEGER PRIMARY KEY") {
+			return i
+		}
+	}
+	return -1
 }

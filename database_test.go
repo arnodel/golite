@@ -14,20 +14,19 @@ func TestDatabase_Find(t *testing.T) {
 	defer db.Close()
 
 	// Get the root page of the 'test' table from the schema.
-	schemaPage, err := db.ReadPage(1)
+	schema, err := db.GetSchema()
 	if err != nil {
-		t.Fatalf("ReadPage(1) for schema failed: %v", err)
+		t.Fatalf("GetSchema() failed: %v", err)
 	}
-	schemaRecord := schemaPage.LeafCells[0].Record
-	rootPageNum, ok := schemaRecord[3].(int64)
+	testTable, ok := schema.Tables["test"]
 	if !ok {
-		t.Fatalf("could not get root page number from schema")
+		t.Fatalf("schema did not contain 'test' table")
 	}
 
 	t.Run("find existing record", func(t *testing.T) {
 		// We inserted 500 rows, let's find one in the middle.
 		targetRowID := int64(250)
-		record, err := db.Find(int(rootPageNum), targetRowID)
+		record, err := db.Find(testTable, targetRowID)
 		if err != nil {
 			t.Fatalf("Find() returned an unexpected error: %v", err)
 		}
@@ -50,7 +49,7 @@ func TestDatabase_Find(t *testing.T) {
 
 	t.Run("find non-existent record", func(t *testing.T) {
 		targetRowID := int64(9999) // This rowID does not exist.
-		_, err := db.Find(int(rootPageNum), targetRowID)
+		_, err := db.Find(testTable, targetRowID)
 		if err == nil {
 			t.Fatal("Find() expected an error for non-existent row, but got nil")
 		}
@@ -69,18 +68,18 @@ func TestDatabase_Scan(t *testing.T) {
 	defer db.Close()
 
 	// Get the root page of the 'test' table from the schema.
-	schemaPage, err := db.ReadPage(1)
+	schema, err := db.GetSchema()
 	if err != nil {
-		t.Fatalf("ReadPage(1) for schema failed: %v", err)
+		t.Fatalf("GetSchema() failed: %v", err)
 	}
-	rootPageNum, ok := schemaPage.LeafCells[0].Record[3].(int64)
+	testTable, ok := schema.Tables["test"]
 	if !ok {
-		t.Fatalf("could not get root page number from schema")
+		t.Fatalf("schema did not contain 'test' table")
 	}
 
 	t.Run("full table scan", func(t *testing.T) {
 		var count int
-		for record, err := range db.Scan(int(rootPageNum)) {
+		for record, err := range db.Scan(testTable) {
 			if err != nil {
 				t.Fatalf("Scan returned an unexpected error: %v", err)
 			}
@@ -96,7 +95,7 @@ func TestDatabase_Scan(t *testing.T) {
 
 	t.Run("stopped table scan", func(t *testing.T) {
 		var count int
-		for _, err := range db.Scan(int(rootPageNum)) {
+		for _, err := range db.Scan(testTable) {
 			if err != nil {
 				t.Fatalf("Scan returned an unexpected error: %v", err)
 			}
