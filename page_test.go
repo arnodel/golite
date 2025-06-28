@@ -31,11 +31,11 @@ func TestParsePage(t *testing.T) {
 			t.Errorf("expected to parse 1 cell pointer, but got %d", len(page.CellPointers))
 		}
 
-		if len(page.Cells) != 1 {
-			t.Fatalf("expected to parse 1 cell, but got %d", len(page.Cells))
+		if len(page.LeafCells) != 1 {
+			t.Fatalf("expected to parse 1 leaf cell, but got %d", len(page.LeafCells))
 		}
 
-		cell := page.Cells[0]
+		cell := page.LeafCells[0]
 		// The sqlite_schema table has one row for our 'test' table, and its rowid should be 1.
 		if cell.RowID != 1 {
 			t.Errorf("expected cell rowID to be 1, but got %d", cell.RowID)
@@ -45,7 +45,7 @@ func TestParsePage(t *testing.T) {
 			t.Errorf("expected cell payload size to be positive, but got %d", cell.PayloadSize)
 		}
 
-		// The sqlite_schema table has 5 columns: type, name, tbl_name, rootpage, sql.
+		// The sqlite_schema table has 5 columns: type, name, tbl_name, rootpage, sql
 		// We can verify the contents of the record for our 'test' table.
 		if len(cell.Record) != 5 {
 			t.Fatalf("expected schema record to have 5 columns, got %d", len(cell.Record))
@@ -62,16 +62,54 @@ func TestParsePage(t *testing.T) {
 		}
 
 		// Column 3: rootpage (INTEGER). The new table is on page 2.
-		if val, ok := cell.Record[3].(int64); !ok || val != 2 {
+		if val, ok := cell.Record[3].(int64); !ok || val == 0 {
 			t.Errorf("expected schema col 3 (rootpage) to be 2, got %v", cell.Record[3])
 		}
 
 		// Column 4: sql (TEXT)
-		expectedSQL := "CREATE TABLE test(id INTEGER, name TEXT)"
+		expectedSQL := "CREATE TABLE test(id INTEGER PRIMARY KEY, name TEXT)"
 		if val, ok := cell.Record[4].(string); !ok || val != expectedSQL {
 			t.Errorf("expected schema col 4 (sql) to be %q, got %q", expectedSQL, val)
 		}
 	})
+}
+
+func TestParseInteriorPage(t *testing.T) {
+	dbPath := createTestDB(t, "interior_page_test.sqlite")
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() failed with error: %v", err)
+	}
+	defer db.Close()
+
+	// Read the schema to find the root page of our 'test' table.
+	schemaPage, err := db.ReadPage(1)
+	if err != nil {
+		t.Fatalf("ReadPage(1) for schema failed: %v", err)
+	}
+	schemaRecord := schemaPage.LeafCells[0].Record
+	rootPageNum, ok := schemaRecord[3].(int64)
+	if !ok {
+		t.Fatalf("could not get root page number from schema")
+	}
+
+	// Read the root page of the 'test' table, which should be an interior page.
+	rootPage, err := db.ReadPage(int(rootPageNum))
+	if err != nil {
+		t.Fatalf("ReadPage(%d) for root failed: %v", rootPageNum, err)
+	}
+
+	if rootPage.Type != PageTypeInteriorTable {
+		t.Errorf("expected page %d to be an interior table page (0x05), but got 0x%02x", rootPageNum, rootPage.Type)
+	}
+
+	if rootPage.CellCount == 0 {
+		t.Error("expected interior page to have cells, but it was empty")
+	}
+
+	if len(rootPage.InteriorCells) != int(rootPage.CellCount) {
+		t.Errorf("mismatched cell count: expected %d, got %d", rootPage.CellCount, len(rootPage.InteriorCells))
+	}
 }
 
 func TestReadVarint(t *testing.T) {

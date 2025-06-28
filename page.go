@@ -24,17 +24,25 @@ type LeafTableCell struct {
 	Record      Record
 }
 
+// InteriorTableCell represents a cell in an interior table page (type 0x05).
+// It points to a child page and contains a key for navigation.
+type InteriorTableCell struct {
+	LeftChildPageNum uint32
+	Key              int64
+}
+
 // Page represents a single page from the SQLite database file.
 type Page struct {
-	Type         byte
-	Freeblock    uint16
-	CellCount    uint16
-	CellContent  uint16
-	Fragmented   byte
-	RightMostPtr uint32
-	CellPointers []uint16
-	Cells        []LeafTableCell
-	RawData      []byte
+	Type          byte
+	Freeblock     uint16
+	CellCount     uint16
+	CellContent   uint16
+	Fragmented    byte
+	RightMostPtr  uint32
+	CellPointers  []uint16
+	LeafCells     []LeafTableCell
+	InteriorCells []InteriorTableCell
+	RawData       []byte
 }
 
 // ParsePage reads a raw byte slice and parses it into a Page struct.
@@ -73,7 +81,7 @@ func ParsePage(data []byte, pageNum int) (*Page, error) {
 
 	// Parse the cells themselves. For now, we only handle leaf table cells.
 	if p.Type == PageTypeLeafTable {
-		p.Cells = make([]LeafTableCell, p.CellCount)
+		p.LeafCells = make([]LeafTableCell, p.CellCount)
 		for i, cellOffset := range p.CellPointers {
 			cellData := data[int(cellOffset):]
 			payloadSize, n := readVarint(cellData)
@@ -86,10 +94,21 @@ func ParsePage(data []byte, pageNum int) (*Page, error) {
 				return nil, fmt.Errorf("failed to parse record in cell %d on page %d: %w", i, pageNum, err)
 			}
 
-			p.Cells[i] = LeafTableCell{
+			p.LeafCells[i] = LeafTableCell{
 				PayloadSize: payloadSize,
 				RowID:       rowID,
 				Record:      record,
+			}
+		}
+	} else if p.Type == PageTypeInteriorTable {
+		p.InteriorCells = make([]InteriorTableCell, p.CellCount)
+		for i, cellOffset := range p.CellPointers {
+			cellData := data[int(cellOffset):]
+			leftChildPageNum := binary.BigEndian.Uint32(cellData[0:4])
+			key, _ := readVarint(cellData[4:])
+			p.InteriorCells[i] = InteriorTableCell{
+				LeftChildPageNum: leftChildPageNum,
+				Key:              key,
 			}
 		}
 	}
