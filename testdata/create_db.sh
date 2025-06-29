@@ -10,4 +10,5 @@ CREATE TABLE test(id INTEGER PRIMARY KEY, name TEXT);
 -- A page size of 4096 bytes can hold a few hundred small rows.
 WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM cnt LIMIT 500)
 INSERT INTO test (name) SELECT 'name' || x FROM cnt;
+CREATE INDEX idx_name ON test(name);
 " > /dev/null 2>&1

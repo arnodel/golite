@@ -8,8 +8,16 @@ type TableInfo struct {
 	RowIDColumnIndex int // The index of the column that is an alias for the rowid. -1 if none.
 }
 
+// IndexInfo holds schema information about a single index.
+type IndexInfo struct {
+	Name      string
+	TableName string
+	RootPage  int
+	SQL       string
+}
+
 // Schema holds the parsed schema for the entire database.
-// For now, it only contains tables.
 type Schema struct {
-	Tables map[string]TableInfo
+	Tables  map[string]TableInfo
+	Indexes map[string]IndexInfo
 }

@@ -25,7 +25,7 @@ func TestDatabase_GetSchema(t *testing.T) {
 	}
 
 	if len(schema.Tables) != 2 {
-		t.Fatalf("expected 2 tables in schema (test and sqlite_schema), got %d", len(schema.Tables))
+		t.Fatalf("expected 1 table in schema, got %d", len(schema.Tables))
 	}
 
 	testTable, ok := schema.Tables["test"]
@@ -53,5 +53,17 @@ func TestDatabase_GetSchema(t *testing.T) {
 	}
 	if schemaTable.RootPage != 1 {
 		t.Errorf("expected schema table root page to be 1, got %d", schemaTable.RootPage)
+	}
+
+	if len(schema.Indexes) != 1 {
+		t.Fatalf("expected 1 index in schema, got %d", len(schema.Indexes))
+	}
+
+	testIndex, ok := schema.Indexes["idx_name"]
+	if !ok {
+		t.Fatal("schema did not contain 'idx_name' index")
+	}
+	if testIndex.TableName != "test" {
+		t.Errorf("expected index table name 'test', got %q", testIndex.TableName)
 	}
 }

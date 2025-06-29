@@ -144,7 +144,8 @@ func (db *Database) scanPage(pageNum int, table TableInfo, yield func(Record, er
 // GetSchema reads and parses the entire database schema from the sqlite_schema table.
 func (db *Database) GetSchema() (*Schema, error) {
 	schema := &Schema{
-		Tables: make(map[string]TableInfo),
+		Tables:  make(map[string]TableInfo),
+		Indexes: make(map[string]IndexInfo),
 	}
 
 	// The schema table is always rooted at page 1.
@@ -172,23 +173,36 @@ func (db *Database) GetSchema() (*Schema, error) {
 		if !ok {
 			return nil, fmt.Errorf("malformed schema record: column 0 (type) is not a string")
 		}
-		if itemType != "table" {
-			continue // We only care about tables for now.
-		}
+		switch itemType {
+		case "table":
+			name, okName := record[1].(string)
+			rootPage, okRootPage := record[3].(int64)
+			sql, okSQL := record[4].(string)
+			if !okName || !okRootPage || !okSQL {
+				return nil, fmt.Errorf("malformed schema record for table %q: one or more columns have an unexpected type", name)
+			}
 
-		name, okName := record[1].(string)
-		rootPage, okRootPage := record[3].(int64)
-		sql, okSQL := record[4].(string)
-		if !okName || !okRootPage || !okSQL {
-			return nil, fmt.Errorf("malformed schema record for table %q: one or more columns have an unexpected type", name)
-		}
-
-		rowIndex := findRowIDColumnIndex(sql)
-		schema.Tables[name] = TableInfo{
-			Name:             name,
-			RootPage:         int(rootPage),
-			SQL:              sql,
-			RowIDColumnIndex: rowIndex,
+			rowIndex := findRowIDColumnIndex(sql)
+			schema.Tables[name] = TableInfo{
+				Name:             name,
+				RootPage:         int(rootPage),
+				SQL:              sql,
+				RowIDColumnIndex: rowIndex,
+			}
+		case "index":
+			name, okName := record[1].(string)
+			tableName, okTableName := record[2].(string)
+			rootPage, okRootPage := record[3].(int64)
+			sql, okSQL := record[4].(string)
+			if !okName || !okTableName || !okRootPage || !okSQL {
+				return nil, fmt.Errorf("malformed schema record for index %q: one or more columns have an unexpected type", name)
+			}
+			schema.Indexes[name] = IndexInfo{
+				Name:      name,
+				TableName: tableName,
+				RootPage:  int(rootPage),
+				SQL:       sql,
+			}
 		}
 	}
 	return schema, nil
