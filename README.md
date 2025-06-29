@@ -39,7 +39,7 @@ This roadmap outlines the planned development steps to reach version 1.0.
 
 This section tracks specific items that are known to be incomplete or require more robust implementations.
 
--   [ ] **Robust SQL Parser:** The current logic for parsing `CREATE TABLE` statements (`findRowIDColumnIndex`) is a simple string search. This should be replaced with a more robust tokenizer or parser to handle complex SQL syntax correctly.
+-   [ ] **Robust SQL Parser:** The schema parser has been improved to extract column names and types from `CREATE TABLE` statements. However, it is still a simplified implementation and may not handle all complex SQL syntax (e.g., constraints with nested parentheses, unusual type definitions).
 -   [ ] **Full Schema Parsing:** The `GetSchema()` function currently only parses `table` and `index` entries from the `sqlite_schema` table. It should be extended to handle other schema objects like `trigger` and `view`.
 
 ## Installation

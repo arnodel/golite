@@ -6,7 +6,6 @@ import (
 	"iter"
 	"os"
 	"sort"
-	"strings"
 )
 
 // Database represents an open SQLite database file.
@@ -247,11 +246,15 @@ func (db *Database) GetSchema() (*Schema, error) {
 				return nil, fmt.Errorf("malformed schema record for table %q: one or more columns have an unexpected type", name)
 			}
 
-			rowIndex := findRowIDColumnIndex(sql)
+			columns, rowIndex, err := ParseTableSQL(sql)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse schema for table %q: %w", name, err)
+			}
 			schema.Tables[name] = TableInfo{
 				Name:             name,
 				RootPage:         int(rootPage),
 				SQL:              sql,
+				Columns:          columns,
 				RowIDColumnIndex: rowIndex,
 			}
 		case "index":
@@ -271,30 +274,4 @@ func (db *Database) GetSchema() (*Schema, error) {
 		}
 	}
 	return schema, nil
-}
-
-// findRowIDColumnIndex performs a simple parse of a CREATE TABLE statement
-// to find the index of the INTEGER PRIMARY KEY column.
-// It returns -1 if no such column is found.
-// NOTE: This is a simplified parser and may not handle all valid SQL syntax,
-// especially complex constraints with nested parentheses.
-func findRowIDColumnIndex(sql string) int {
-	start := strings.Index(sql, "(")
-	if start == -1 {
-		return -1
-	}
-	// We assume the column definitions end at the last parenthesis.
-	// This is fragile but works for simple CREATE TABLE statements.
-	end := strings.LastIndex(sql, ")")
-	if end <= start {
-		return -1
-	}
-
-	defs := strings.Split(sql[start+1:end], ",")
-	for i, def := range defs {
-		if strings.Contains(strings.ToUpper(strings.TrimSpace(def)), "INTEGER PRIMARY KEY") {
-			return i
-		}
-	}
-	return -1
 }

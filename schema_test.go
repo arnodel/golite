@@ -25,7 +25,7 @@ func TestDatabase_GetSchema(t *testing.T) {
 	}
 
 	if len(schema.Tables) != 2 {
-		t.Fatalf("expected 1 table in schema, got %d", len(schema.Tables))
+		t.Fatalf("expected 2 tables in schema, got %d", len(schema.Tables))
 	}
 
 	testTable, ok := schema.Tables["test"]
@@ -42,6 +42,20 @@ func TestDatabase_GetSchema(t *testing.T) {
 	expectedSQL := "CREATE TABLE test(id INTEGER PRIMARY KEY, name TEXT)"
 	if testTable.SQL != expectedSQL {
 		t.Errorf("expected table SQL %q, got %q", expectedSQL, testTable.SQL)
+	}
+
+	// Check that columns were parsed correctly
+	if len(testTable.Columns) != 2 {
+		t.Fatalf("expected 2 columns, got %d", len(testTable.Columns))
+	}
+	if testTable.Columns[0].Name != "id" || testTable.Columns[0].Type != "INTEGER" {
+		t.Errorf("unexpected column 0: got %+v, want {id INTEGER}", testTable.Columns[0])
+	}
+	if testTable.Columns[1].Name != "name" || testTable.Columns[1].Type != "TEXT" {
+		t.Errorf("unexpected column 1: got %+v, want {name TEXT}", testTable.Columns[1])
+	}
+	if testTable.RowIDColumnIndex != 0 {
+		t.Errorf("expected RowIDColumnIndex to be 0, got %d", testTable.RowIDColumnIndex)
 	}
 
 	schemaTable, ok := schema.Tables["sqlite_schema"]
