@@ -129,6 +129,46 @@ func TestDatabase_IndexSeek(t *testing.T) {
 	})
 }
 
+func TestDatabase_IndexScan(t *testing.T) {
+	dbPath := createTestDB(t, "index_scan_test.sqlite")
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() failed with error: %v", err)
+	}
+	defer db.Close()
+
+	schema, err := db.GetSchema()
+	if err != nil {
+		t.Fatalf("GetSchema() failed: %v", err)
+	}
+	indexInfo, ok := schema.Indexes["idx_name"]
+	if !ok {
+		t.Fatalf("schema did not contain 'idx_name' index")
+	}
+
+	iterator := db.IndexScan(indexInfo)
+	count := 0
+	var prevRecord Record
+	for record, err := range iterator {
+		if err != nil {
+			t.Fatalf("IndexScan iterator returned an unexpected error: %v", err)
+		}
+		count++
+
+		// Check that records are sorted.
+		if prevRecord != nil {
+			if CompareRecords(prevRecord, record) > 0 {
+				t.Errorf("IndexScan yielded unsorted records: %v came after %v", record, prevRecord)
+			}
+		}
+		prevRecord = record
+	}
+
+	if count != 500 {
+		t.Errorf("expected to scan 500 index records, but got %d", count)
+	}
+}
+
 func TestDatabase_TableScan(t *testing.T) {
 	dbPath := createTestDB(t, "scan_test.sqlite")
 	db, err := Open(dbPath)

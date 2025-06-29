@@ -168,6 +168,46 @@ func (db *Database) IndexSeek(index IndexInfo, key Record) RecordIterator {
 	}
 }
 
+// IndexScan returns an iterator over all records in an index.
+// The records are yielded in the order of the index.
+// The yielded record is the index record itself, not the table record.
+func (db *Database) IndexScan(index IndexInfo) RecordIterator {
+	return func(yield func(Record, error) bool) {
+		db.indexScanPage(index.RootPage, yield)
+	}
+}
+
+// indexScanPage is the recursive helper for IndexScan. It traverses the B-Tree in-order.
+func (db *Database) indexScanPage(pageNum int, yield func(Record, error) bool) bool {
+	page, err := db.ReadPage(pageNum)
+	if err != nil {
+		return yield(nil, err)
+	}
+
+	switch page.Type {
+	case PageTypeLeafIndex:
+		for _, cell := range page.LeafIndexCells {
+			if !yield(cell.Payload, nil) {
+				return false // Stop scan
+			}
+		}
+		return true // Continue scan
+
+	case PageTypeInteriorIndex:
+		for _, cell := range page.InteriorIndexCells {
+			if !db.indexScanPage(int(cell.LeftChildPageNum), yield) {
+				return false // Stop scan
+			}
+			if !yield(cell.Payload, nil) {
+				return false // Stop scan
+			}
+		}
+		return db.indexScanPage(int(page.RightMostPtr), yield)
+	default:
+		return yield(nil, fmt.Errorf("unexpected page type %02x encountered during index scan", page.Type))
+	}
+}
+
 // TableScan returns an iterator over all records in a table.
 // The iterator can be used with a for...range loop.
 // Note: This API requires Go 1.22+ with GOEXPERIMENT=rangefunc, or Go 1.23+.
