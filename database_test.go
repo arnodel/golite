@@ -1,11 +1,10 @@
 package golite
 
 import (
-	"errors"
 	"testing"
 )
 
-func TestDatabase_Find(t *testing.T) {
+func TestDatabase_TableSeek(t *testing.T) {
 	dbPath := createTestDB(t, "find_test.sqlite")
 	db, err := Open(dbPath)
 	if err != nil {
@@ -26,42 +25,52 @@ func TestDatabase_Find(t *testing.T) {
 	t.Run("find existing record", func(t *testing.T) {
 		// We inserted 500 rows, let's find one in the middle.
 		targetRowID := int64(250)
-		record, err := db.Find(testTable, targetRowID)
-		if err != nil {
-			t.Fatalf("Find() returned an unexpected error: %v", err)
+		iterator := db.TableSeek(testTable, targetRowID)
+
+		count := 0
+		for record, err := range iterator {
+			if err != nil {
+				t.Fatalf("TableSeek() iterator returned an unexpected error: %v", err)
+			}
+			count++
+
+			if len(record) != 2 {
+				t.Fatalf("expected record to have 2 columns, got %d", len(record))
+			}
+
+			// Column 0: id (INTEGER)
+			// This is an alias for the rowid, so it should match.
+			if id, ok := record[0].(int64); !ok || id != targetRowID {
+				t.Errorf("expected record col 0 (id) to be %d, got %v", targetRowID, record[0])
+			}
+
+			// Column 1: name (TEXT)
+			expectedName := "name250"
+			if name, ok := record[1].(string); !ok || name != expectedName {
+				t.Errorf("expected record col 1 (name) to be %q, got %v", expectedName, record[1])
+			}
 		}
 
-		if len(record) != 2 {
-			t.Fatalf("expected record to have 2 columns, got %d", len(record))
-		}
-
-		// Column 0: id (INTEGER)
-		// This is an alias for the rowid, so it should match.
-		if id, ok := record[0].(int64); !ok || id != targetRowID {
-			t.Errorf("expected record col 0 (id) to be %d, got %v", targetRowID, record[0])
-		}
-
-		// Column 1: name (TEXT)
-		expectedName := "name250"
-		if name, ok := record[1].(string); !ok || name != expectedName {
-			t.Errorf("expected record col 1 (name) to be %q, got %v", expectedName, record[1])
+		if count != 1 {
+			t.Errorf("expected iterator to yield 1 record, but it yielded %d", count)
 		}
 	})
 
 	t.Run("find non-existent record", func(t *testing.T) {
 		targetRowID := int64(9999) // This rowID does not exist.
-		_, err := db.Find(testTable, targetRowID)
-		if err == nil {
-			t.Fatal("Find() expected an error for non-existent row, but got nil")
+		iterator := db.TableSeek(testTable, targetRowID)
+		count := 0
+		for range iterator {
+			count++
 		}
-		if !errors.Is(err, ErrNotFound) {
-			t.Errorf("Find() returned error %v, want %v", err, ErrNotFound)
+		if count != 0 {
+			t.Errorf("expected an empty iterator for non-existent row, but it yielded %d records", count)
 		}
 	})
 }
 
-func TestDatabase_FindInIndex(t *testing.T) {
-	dbPath := createTestDB(t, "find_index_test.sqlite")
+func TestDatabase_IndexSeek(t *testing.T) {
+	dbPath := createTestDB(t, "index_seek_test.sqlite")
 	db, err := Open(dbPath)
 	if err != nil {
 		t.Fatalf("Open() failed with error: %v", err)
@@ -83,21 +92,39 @@ func TestDatabase_FindInIndex(t *testing.T) {
 		key := Record{"name300"}
 		expectedRowID := int64(300)
 
-		rowid, err := db.FindInIndex(indexInfo, key)
-		if err != nil {
-			t.Fatalf("FindInIndex() returned an unexpected error: %v", err)
-		}
+		iterator := db.IndexSeek(indexInfo, key)
+		count := 0
+		for record, err := range iterator {
+			if err != nil {
+				t.Fatalf("IndexSeek() iterator returned an unexpected error: %v", err)
+			}
+			count++
 
-		if rowid != expectedRowID {
-			t.Errorf("expected rowid %d, got %d", expectedRowID, rowid)
+			// The yielded record is the index record: (key, rowid)
+			if len(record) != 2 {
+				t.Fatalf("expected index record to have 2 columns, got %d", len(record))
+			}
+			if name, ok := record[0].(string); !ok || name != "name300" {
+				t.Errorf("expected key 'name300', got %v", record[0])
+			}
+			if rowid, ok := record[1].(int64); !ok || rowid != expectedRowID {
+				t.Errorf("expected rowid %d, got %v", expectedRowID, record[1])
+			}
+		}
+		if count != 1 {
+			t.Errorf("expected iterator to yield 1 record, but it yielded %d", count)
 		}
 	})
 
 	t.Run("find non-existent key in index", func(t *testing.T) {
 		key := Record{"non_existent_name"}
-		_, err := db.FindInIndex(indexInfo, key)
-		if !errors.Is(err, ErrNotFound) {
-			t.Errorf("FindInIndex() returned error %v, want %v", err, ErrNotFound)
+		iterator := db.IndexSeek(indexInfo, key)
+		count := 0
+		for range iterator {
+			count++
+		}
+		if count != 0 {
+			t.Errorf("expected an empty iterator for non-existent key, but it yielded %d records", count)
 		}
 	})
 }

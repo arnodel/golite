@@ -55,102 +55,115 @@ func (db *Database) ReadPage(pageNum int) (*Page, error) {
 	return ParsePage(pageData, pageNum)
 }
 
-// Find searches for a record with a specific rowID within a table's B-Tree.
-func (db *Database) Find(table TableInfo, rowID int64) (Record, error) {
-	pageNum := table.RootPage
-	for {
-		page, err := db.ReadPage(pageNum)
-		if err != nil {
-			return nil, err
-		}
+// TableSeek searches for a record with a specific rowID within a table's B-Tree.
+// It returns a RecordIterator that will yield at most one record. If the record
+// is not found, the iterator will be empty.
+func (db *Database) TableSeek(table TableInfo, rowID int64) RecordIterator {
+	return func(yield func(Record, error) bool) {
+		pageNum := table.RootPage
+		for {
+			page, err := db.ReadPage(pageNum)
+			if err != nil {
+				yield(nil, err)
+				return
+			}
 
-		switch page.Type {
-		case PageTypeLeafTable:
-			// We've reached a leaf page. The cells are sorted by rowID, so we can binary search.
-			i := sort.Search(len(page.LeafCells), func(i int) bool {
-				return page.LeafCells[i].RowID >= rowID
-			})
+			switch page.Type {
+			case PageTypeLeafTable:
+				// We've reached a leaf page. The cells are sorted by rowID, so we can binary search.
+				i := sort.Search(len(page.LeafCells), func(i int) bool {
+					return page.LeafCells[i].RowID >= rowID
+				})
 
-			if i < len(page.LeafCells) && page.LeafCells[i].RowID == rowID {
-				// Found it.
-				cell := page.LeafCells[i]
-				record := cell.Record
-				if table.RowIDColumnIndex != -1 {
-					record[table.RowIDColumnIndex] = cell.RowID
-					return record, nil
+				if i < len(page.LeafCells) && page.LeafCells[i].RowID == rowID {
+					// Found it.
+					cell := page.LeafCells[i]
+					record := cell.Record
+					if table.RowIDColumnIndex != -1 {
+						record[table.RowIDColumnIndex] = cell.RowID
+						yield(record, nil)
+					} else {
+						yield(append(Record{cell.RowID}, record...), nil)
+					}
 				}
-				return append(Record{cell.RowID}, record...), nil
-			}
-			return nil, ErrNotFound // Not found on this leaf page.
+				return // We are done, whether we found it or not.
 
-		case PageTypeInteriorTable:
-			// It's an interior page. The cells are sorted by key, so we can binary search
-			// to find the correct child page to descend into.
-			i := sort.Search(len(page.InteriorCells), func(i int) bool {
-				return rowID <= page.InteriorCells[i].Key
-			})
+			case PageTypeInteriorTable:
+				// It's an interior page. The cells are sorted by key, so we can binary search
+				// to find the correct child page to descend into.
+				i := sort.Search(len(page.InteriorCells), func(i int) bool {
+					return rowID <= page.InteriorCells[i].Key
+				})
 
-			if i < len(page.InteriorCells) {
-				pageNum = int(page.InteriorCells[i].LeftChildPageNum)
-			} else {
-				// The rowID is greater than all keys in the cells, so go to the right-most child.
-				pageNum = int(page.RightMostPtr)
+				if i < len(page.InteriorCells) {
+					pageNum = int(page.InteriorCells[i].LeftChildPageNum)
+				} else {
+					// The rowID is greater than all keys in the cells, so go to the right-most child.
+					pageNum = int(page.RightMostPtr)
+				}
+			default:
+				yield(nil, fmt.Errorf("unexpected page type %02x encountered during search", page.Type))
+				return
 			}
-		default:
-			return nil, fmt.Errorf("unexpected page type %02x encountered during search", page.Type)
 		}
 	}
 }
 
-// FindInIndex searches for a key within an index's B-Tree and returns the corresponding rowID.
+// IndexSeek searches for a key within an index's B-Tree. It returns a RecordIterator
+// that yields all matching index records. For a unique index, this will be at most one record.
 // The key is a Record containing the values of the indexed columns.
-func (db *Database) FindInIndex(index IndexInfo, key Record) (int64, error) {
-	pageNum := index.RootPage
-	for {
-		page, err := db.ReadPage(pageNum)
-		if err != nil {
-			return 0, err
-		}
+func (db *Database) IndexSeek(index IndexInfo, key Record) RecordIterator {
+	return func(yield func(Record, error) bool) {
+		pageNum := index.RootPage
+		for {
+			page, err := db.ReadPage(pageNum)
+			if err != nil {
+				yield(nil, err)
+				return
+			}
 
-		switch page.Type {
-		case PageTypeLeafIndex:
-			// We've reached a leaf page. The cells are sorted by payload, so we can binary search.
-			i := sort.Search(len(page.LeafIndexCells), func(i int) bool {
-				// We are looking for the first record that is >= our key.
-				// The cell payload is (key_values..., rowid). We only compare the key part.
-				// This is safe because a valid index payload will always be longer than the key.
-				return CompareRecords(page.LeafIndexCells[i].Payload[:len(key)], key) >= 0
-			})
+			switch page.Type {
+			case PageTypeLeafIndex:
+				// We've reached a leaf page. The cells are sorted by payload, so we can binary search.
+				i := sort.Search(len(page.LeafIndexCells), func(i int) bool {
+					// We are looking for the first record that is >= our key.
+					// The cell payload is (key_values..., rowid). We only compare the key part.
+					// This is safe because a valid index payload will always be longer than the key.
+					return CompareRecords(page.LeafIndexCells[i].Payload[:len(key)], key) >= 0
+				})
 
-			if i < len(page.LeafIndexCells) {
-				cell := page.LeafIndexCells[i]
-				// Check if it's an exact match.
-				if len(cell.Payload) == len(key)+1 && CompareRecords(cell.Payload[:len(key)], key) == 0 {
-					rowid, ok := cell.Payload[len(cell.Payload)-1].(int64)
-					if !ok {
-						return 0, fmt.Errorf("malformed index record: rowid is not an integer")
+				// Now, iterate from the found position as long as the keys match.
+				for ; i < len(page.LeafIndexCells); i++ {
+					cell := page.LeafIndexCells[i]
+					if len(cell.Payload) < len(key) {
+						continue
 					}
-					return rowid, nil
+					if CompareRecords(cell.Payload[:len(key)], key) == 0 {
+						if !yield(cell.Payload, nil) {
+							return // Consumer requested stop
+						}
+					} else {
+						// Since the cells are sorted, we can stop as soon as we find a non-match.
+						break
+					}
 				}
-			}
-			return 0, ErrNotFound // Not found on this leaf page.
+				return // We are done searching this branch.
 
-		case PageTypeInteriorIndex:
-			// It's an interior page. The cells are sorted by payload, so we can binary search
-			// to find the correct child page to descend into.
-			i := sort.Search(len(page.InteriorIndexCells), func(i int) bool {
-				// Find the first cell whose key is >= our search key.
-				return CompareRecords(key, page.InteriorIndexCells[i].Payload) <= 0
-			})
+			case PageTypeInteriorIndex:
+				// It's an interior page. Find the correct child page to descend into.
+				i := sort.Search(len(page.InteriorIndexCells), func(i int) bool {
+					return CompareRecords(key, page.InteriorIndexCells[i].Payload) <= 0
+				})
 
-			if i < len(page.InteriorIndexCells) {
-				pageNum = int(page.InteriorIndexCells[i].LeftChildPageNum)
-			} else {
-				// If key is greater than all keys in the cells, go to the right-most child.
-				pageNum = int(page.RightMostPtr)
+				if i < len(page.InteriorIndexCells) {
+					pageNum = int(page.InteriorIndexCells[i].LeftChildPageNum)
+				} else {
+					pageNum = int(page.RightMostPtr)
+				}
+			default:
+				yield(nil, fmt.Errorf("unexpected page type %02x encountered during index search", page.Type))
+				return
 			}
-		default:
-			return 0, fmt.Errorf("unexpected page type %02x encountered during index search", page.Type)
 		}
 	}
 }
