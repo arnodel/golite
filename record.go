@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"iter"
 	"math"
 	"strings"
 )
@@ -16,6 +17,10 @@ var SQLNull = NullType{}
 
 // Record represents a single row of data, as a slice of Values.
 type Record []any
+
+// RecordIterator is the fundamental type for our execution pipeline.
+// It represents a stream of rows that can be consumed.
+type RecordIterator iter.Seq2[Record, error]
 
 // ParseRecord parses a raw byte slice from a cell's payload into a Record.
 func ParseRecord(data []byte) (Record, error) {
