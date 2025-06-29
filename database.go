@@ -102,6 +102,60 @@ func (db *Database) Find(table TableInfo, rowID int64) (Row, error) {
 	}
 }
 
+// FindInIndex searches for a key within an index's B-Tree and returns the corresponding rowID.
+// The key is a Record containing the values of the indexed columns.
+func (db *Database) FindInIndex(index IndexInfo, key Record) (int64, error) {
+	pageNum := index.RootPage
+	for {
+		page, err := db.ReadPage(pageNum)
+		if err != nil {
+			return 0, err
+		}
+
+		switch page.Type {
+		case PageTypeLeafIndex:
+			// We've reached a leaf page, search for the key here.
+			for _, cell := range page.LeafIndexCells {
+				// The key we are searching for is a prefix of the cell's payload.
+				// e.g., key is ('some_name'), payload is ('some_name', rowid)
+				if len(cell.Payload) != len(key)+1 {
+					continue // A perfect match requires the payload to have exactly one more element (the rowid).
+				}
+
+				payloadPrefix := cell.Payload[:len(key)]
+				if CompareRecords(key, payloadPrefix) == 0 {
+					// Found a match. The rowid is the last element in the payload.
+					rowid, ok := cell.Payload[len(cell.Payload)-1].(int64)
+					if !ok {
+						return 0, fmt.Errorf("malformed index record: rowid is not an integer")
+					}
+					return rowid, nil
+				}
+			}
+			return 0, ErrNotFound
+
+		case PageTypeInteriorIndex:
+			// It's an interior page, find the next page to visit.
+			// A binary search here would be more efficient than a linear scan.
+			foundChild := false
+			for _, cell := range page.InteriorIndexCells {
+				// If our key is less than or equal to the cell's key, descend to its child.
+				if CompareRecords(key, cell.Payload) <= 0 {
+					pageNum = int(cell.LeftChildPageNum)
+					foundChild = true
+					break
+				}
+			}
+			if !foundChild {
+				// If key is greater than all keys in the cells, go to the right-most child.
+				pageNum = int(page.RightMostPtr)
+			}
+		default:
+			return 0, fmt.Errorf("unexpected page type %02x encountered during index search", page.Type)
+		}
+	}
+}
+
 // Scan returns an iterator over all records in a table.
 // The iterator can be used with a for...range loop.
 // Note: This API requires Go 1.22+ with GOEXPERIMENT=rangefunc, or Go 1.23+.

@@ -64,6 +64,48 @@ func TestDatabase_Find(t *testing.T) {
 	})
 }
 
+func TestDatabase_FindInIndex(t *testing.T) {
+	dbPath := createTestDB(t, "find_index_test.sqlite")
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() failed with error: %v", err)
+	}
+	defer db.Close()
+
+	schema, err := db.GetSchema()
+	if err != nil {
+		t.Fatalf("GetSchema() failed: %v", err)
+	}
+	indexInfo, ok := schema.Indexes["idx_name"]
+	if !ok {
+		t.Fatalf("schema did not contain 'idx_name' index")
+	}
+
+	t.Run("find existing key in index", func(t *testing.T) {
+		// The index is on the 'name' column. Let's find 'name300'.
+		// The corresponding rowid should be 300.
+		key := Record{"name300"}
+		expectedRowID := int64(300)
+
+		rowid, err := db.FindInIndex(indexInfo, key)
+		if err != nil {
+			t.Fatalf("FindInIndex() returned an unexpected error: %v", err)
+		}
+
+		if rowid != expectedRowID {
+			t.Errorf("expected rowid %d, got %d", expectedRowID, rowid)
+		}
+	})
+
+	t.Run("find non-existent key in index", func(t *testing.T) {
+		key := Record{"non_existent_name"}
+		_, err := db.FindInIndex(indexInfo, key)
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("FindInIndex() returned error %v, want %v", err, ErrNotFound)
+		}
+	})
+}
+
 func TestDatabase_Scan(t *testing.T) {
 	dbPath := createTestDB(t, "scan_test.sqlite")
 	db, err := Open(dbPath)
