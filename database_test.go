@@ -116,7 +116,7 @@ func TestDatabase_IndexSeek(t *testing.T) {
 		}
 	})
 
-	t.Run("find non-existent key in index", func(t *testing.T) {
+	t.Run("index seek non-existent key", func(t *testing.T) {
 		key := Record{"non_existent_name"}
 		iterator := db.IndexSeek(indexInfo, key)
 		count := 0
@@ -136,19 +136,26 @@ func TestDatabase_IndexScan(t *testing.T) {
 		t.Fatalf("Open() failed with error: %v", err)
 	}
 	defer db.Close()
+	// We'll use the 'index_scan_test.sqlite' database, which should already
+	// contain a table 'test' with an index 'idx_name' on the 'name' column,
+	// populated with 500 rows. The create_db.sh script handles this setup.
 
 	schema, err := db.GetSchema()
 	if err != nil {
 		t.Fatalf("GetSchema() failed: %v", err)
 	}
-	indexInfo, ok := schema.Indexes["idx_name"]
+
+	// Get the index info.
+	indexInfo, ok := schema.Indexes["idx_name"] // We're now looking for "idx_name"
 	if !ok {
 		t.Fatalf("schema did not contain 'idx_name' index")
 	}
 
+	// Perform an IndexScan
 	iterator := db.IndexScan(indexInfo)
 	count := 0
 	var prevRecord Record
+
 	for record, err := range iterator {
 		if err != nil {
 			t.Fatalf("IndexScan iterator returned an unexpected error: %v", err)
@@ -167,18 +174,9 @@ func TestDatabase_IndexScan(t *testing.T) {
 	if count != 500 {
 		t.Errorf("expected to scan 500 index records, but got %d", count)
 	}
-}
-
-func TestDatabase_TableScan(t *testing.T) {
-	dbPath := createTestDB(t, "scan_test.sqlite")
-	db, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open() failed with error: %v", err)
-	}
-	defer db.Close()
 
 	// Get the root page of the 'test' table from the schema.
-	schema, err := db.GetSchema()
+	schema, err = db.GetSchema()
 	if err != nil {
 		t.Fatalf("GetSchema() failed: %v", err)
 	}
