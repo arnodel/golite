@@ -111,6 +111,70 @@ func TestSerialTypeToValue(t *testing.T) {
 	}
 }
 
+func TestCompareRecords(t *testing.T) {
+	testCases := []struct {
+		name string
+		a    Record
+		b    Record
+		want int // -1 for a < b, 0 for a == b, 1 for a > b
+	}{
+		// Basic equality
+		{name: "equal ints", a: Record{int64(1)}, b: Record{int64(1)}, want: 0},
+		{name: "equal floats", a: Record{3.14}, b: Record{3.14}, want: 0},
+		{name: "equal strings", a: Record{"hello"}, b: Record{"hello"}, want: 0},
+		{name: "equal blobs", a: Record{[]byte{1, 2}}, b: Record{[]byte{1, 2}}, want: 0},
+		{name: "equal nulls", a: Record{SQLNull}, b: Record{SQLNull}, want: 0},
+		{name: "equal mixed records", a: Record{int64(1), "a", SQLNull}, b: Record{int64(1), "a", SQLNull}, want: 0},
+		{name: "equal int and float", a: Record{int64(5)}, b: Record{5.0}, want: 0},
+
+		// Basic inequality
+		{name: "lesser int", a: Record{int64(1)}, b: Record{int64(2)}, want: -1},
+		{name: "greater int", a: Record{int64(3)}, b: Record{int64(2)}, want: 1},
+		{name: "lesser float", a: Record{1.0}, b: Record{2.0}, want: -1},
+		{name: "greater float", a: Record{3.0}, b: Record{2.0}, want: 1},
+		{name: "lesser string", a: Record{"a"}, b: Record{"b"}, want: -1},
+		{name: "greater string", a: Record{"c"}, b: Record{"b"}, want: 1},
+		{name: "lesser blob", a: Record{[]byte{1}}, b: Record{[]byte{2}}, want: -1},
+		{name: "greater blob", a: Record{[]byte{3}}, b: Record{[]byte{2}}, want: 1},
+		{name: "lesser int vs float", a: Record{int64(4)}, b: Record{4.1}, want: -1},
+		{name: "greater int vs float", a: Record{int64(5)}, b: Record{4.9}, want: 1},
+
+		// Type precedence
+		{name: "null vs int", a: Record{SQLNull}, b: Record{int64(1)}, want: -1},
+		{name: "int vs null", a: Record{int64(1)}, b: Record{SQLNull}, want: 1},
+		{name: "int vs string", a: Record{int64(123)}, b: Record{"abc"}, want: -1},
+		{name: "string vs int", a: Record{"abc"}, b: Record{int64(123)}, want: 1},
+		{name: "string vs blob", a: Record{"abc"}, b: Record{[]byte("abc")}, want: -1},
+		{name: "blob vs string", a: Record{[]byte("abc")}, b: Record{"abc"}, want: 1},
+
+		// Multi-column records
+		{name: "multi-col first diff", a: Record{int64(1), "b"}, b: Record{int64(1), "c"}, want: -1},
+		{name: "multi-col second diff", a: Record{int64(2), "a"}, b: Record{int64(1), "z"}, want: 1},
+
+		// Record length differences
+		{name: "prefix is lesser", a: Record{int64(1)}, b: Record{int64(1), int64(2)}, want: -1},
+		{name: "prefix is greater", a: Record{int64(1), int64(2)}, b: Record{int64(1)}, want: 1},
+		{name: "empty vs non-empty", a: Record{}, b: Record{int64(1)}, want: -1},
+		{name: "equal empty", a: Record{}, b: Record{}, want: 0},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CompareRecords(tc.a, tc.b)
+			if got != tc.want {
+				t.Errorf("CompareRecords(%v, %v) = %d, want %d", tc.a, tc.b, got, tc.want)
+			}
+
+			// Test the reverse comparison as well
+			reverseWant := -tc.want
+			reverseGot := CompareRecords(tc.b, tc.a)
+			if reverseGot != reverseWant {
+				t.Errorf("Reverse CompareRecords(%v, %v) = %d, want %d", tc.b, tc.a, reverseGot, reverseWant)
+			}
+		})
+	}
+}
+
 func TestReadVarint_Errors(t *testing.T) {
 	// The current implementation of readVarint can panic if it reads past the
 	// end of the slice. This test is here to catch that if the implementation

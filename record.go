@@ -1,9 +1,11 @@
 package golite
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math"
+	"strings"
 )
 
 // NullType is a sentinel type used to represent a SQL NULL value.
@@ -54,6 +56,93 @@ func ParseRecord(data []byte) (Record, error) {
 	}
 
 	return record, nil
+}
+
+// CompareRecords compares two records according to SQLite's sorting rules.
+// It returns -1 if a < b, 0 if a == b, and 1 if a > b.
+// This is essential for searching index B-Trees.
+func CompareRecords(a, b Record) int {
+	minLen := len(a)
+	if len(b) < minLen {
+		minLen = len(b)
+	}
+
+	for i := 0; i < minLen; i++ {
+		cmp := compareValues(a[i], b[i])
+		if cmp != 0 {
+			return cmp
+		}
+	}
+
+	// If we've exhausted one record, the shorter one is smaller.
+	if len(a) < len(b) {
+		return -1
+	}
+	if len(a) > len(b) {
+		return 1
+	}
+
+	return 0 // Records are identical.
+}
+
+// getTypeRank returns an integer representing the type's precedence for comparison.
+// Lower ranks are considered "less than" higher ranks.
+func getTypeRank(v any) int {
+	switch v.(type) {
+	case NullType:
+		return 0
+	case int64, float64:
+		return 1 // Numeric types
+	case string:
+		return 2
+	case []byte:
+		return 3
+	default:
+		// This should not be reached with valid records.
+		return 4
+	}
+}
+
+// toFloat64 converts a numeric value (int64 or float64) to a float64 for comparison.
+func toFloat64(v any) float64 {
+	if i, ok := v.(int64); ok {
+		return float64(i)
+	}
+	return v.(float64)
+}
+
+// compareValues compares two individual values based on SQLite's type ordering rules.
+func compareValues(a, b any) int {
+	rankA := getTypeRank(a)
+	rankB := getTypeRank(b)
+
+	if rankA != rankB {
+		if rankA < rankB {
+			return -1
+		}
+		return 1
+	}
+
+	// Ranks are the same, so we can compare the values directly.
+	switch rankA {
+	case 0: // NULL
+		return 0 // All NULLs are equal.
+	case 1: // Numeric
+		fA := toFloat64(a)
+		fB := toFloat64(b)
+		if fA < fB {
+			return -1
+		} else if fA > fB {
+			return 1
+		}
+		return 0
+	case 2: // Text
+		return strings.Compare(a.(string), b.(string))
+	case 3: // Blob
+		return bytes.Compare(a.([]byte), b.([]byte))
+	}
+
+	return 0 // Should not be reached.
 }
 
 // serialTypeToValue decodes a single value from the record body based on its serial type.
