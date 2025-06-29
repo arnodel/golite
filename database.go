@@ -155,18 +155,18 @@ func (db *Database) FindInIndex(index IndexInfo, key Record) (int64, error) {
 	}
 }
 
-// Scan returns an iterator over all records in a table.
+// TableScan returns an iterator over all records in a table.
 // The iterator can be used with a for...range loop.
 // Note: This API requires Go 1.22+ with GOEXPERIMENT=rangefunc, or Go 1.23+.
-func (db *Database) Scan(table TableInfo) RecordIterator {
+func (db *Database) TableScan(table TableInfo) RecordIterator {
 	return func(yield func(Record, error) bool) {
-		db.scanPage(table.RootPage, table, yield)
+		db.tableScanPage(table.RootPage, table, yield)
 	}
 }
 
-// scanPage is the recursive helper for Scan. It traverses the B-Tree in-order.
+// tableScanPage is the recursive helper for TableScan. It traverses the B-Tree in-order.
 // It returns true to continue scanning, or false to stop.
-func (db *Database) scanPage(pageNum int, table TableInfo, yield func(Record, error) bool) bool {
+func (db *Database) tableScanPage(pageNum int, table TableInfo, yield func(Record, error) bool) bool {
 	page, err := db.ReadPage(pageNum)
 	if err != nil {
 		return yield(nil, err)
@@ -191,11 +191,11 @@ func (db *Database) scanPage(pageNum int, table TableInfo, yield func(Record, er
 
 	case PageTypeInteriorTable:
 		for _, cell := range page.InteriorCells {
-			if !db.scanPage(int(cell.LeftChildPageNum), table, yield) {
+			if !db.tableScanPage(int(cell.LeftChildPageNum), table, yield) {
 				return false // Stop scan
 			}
 		}
-		return db.scanPage(int(page.RightMostPtr), table, yield)
+		return db.tableScanPage(int(page.RightMostPtr), table, yield)
 	default:
 		return yield(nil, fmt.Errorf("unexpected page type %02x encountered during scan", page.Type))
 	}
@@ -209,7 +209,7 @@ func (db *Database) GetSchema() (*Schema, error) {
 	}
 
 	// The schema table is always rooted at page 1.
-	// We create a "bootstrap" TableInfo for the schema table itself to use the Scan method.
+	// We create a "bootstrap" TableInfo for the schema table itself to use the TableScan method.
 	// The schema table has no INTEGER PRIMARY KEY, so its RowIDColumnIndex is -1.
 	schemaTableInfo := TableInfo{
 		Name:             "sqlite_schema",
@@ -219,7 +219,7 @@ func (db *Database) GetSchema() (*Schema, error) {
 	}
 	schema.Tables[schemaTableInfo.Name] = schemaTableInfo
 
-	for record, err := range db.Scan(schemaTableInfo) {
+	for record, err := range db.TableScan(schemaTableInfo) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan schema table: %w", err)
 		}

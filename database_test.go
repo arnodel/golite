@@ -102,7 +102,7 @@ func TestDatabase_FindInIndex(t *testing.T) {
 	})
 }
 
-func TestDatabase_Scan(t *testing.T) {
+func TestDatabase_TableScan(t *testing.T) {
 	dbPath := createTestDB(t, "scan_test.sqlite")
 	db, err := Open(dbPath)
 	if err != nil {
@@ -122,7 +122,7 @@ func TestDatabase_Scan(t *testing.T) {
 
 	t.Run("full table scan", func(t *testing.T) {
 		var count int
-		for record, err := range db.Scan(testTable) {
+		for record, err := range db.TableScan(testTable) {
 			if err != nil {
 				t.Fatalf("Scan returned an unexpected error: %v", err)
 			}
@@ -138,7 +138,7 @@ func TestDatabase_Scan(t *testing.T) {
 
 	t.Run("stopped table scan", func(t *testing.T) {
 		var count int
-		for _, err := range db.Scan(testTable) {
+		for _, err := range db.TableScan(testTable) {
 			if err != nil {
 				t.Fatalf("Scan returned an unexpected error: %v", err)
 			}
