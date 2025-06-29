@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"iter"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -67,33 +68,36 @@ func (db *Database) Find(table TableInfo, rowID int64) (Row, error) {
 
 		switch page.Type {
 		case PageTypeLeafTable:
-			// We've reached a leaf page, search for the rowID here.
-			for _, cell := range page.LeafCells {
-				if cell.RowID == rowID {
-					record := cell.Record
-					if table.RowIDColumnIndex != -1 && len(record) > table.RowIDColumnIndex {
-						record[table.RowIDColumnIndex] = cell.RowID
-					}
-					return Row{
-						RowID:  cell.RowID,
-						Record: record,
-					}, nil
+			// We've reached a leaf page. The cells are sorted by rowID, so we can binary search.
+			i := sort.Search(len(page.LeafCells), func(i int) bool {
+				return page.LeafCells[i].RowID >= rowID
+			})
+
+			if i < len(page.LeafCells) && page.LeafCells[i].RowID == rowID {
+				// Found it.
+				cell := page.LeafCells[i]
+				record := cell.Record
+				if table.RowIDColumnIndex != -1 && len(record) > table.RowIDColumnIndex {
+					record[table.RowIDColumnIndex] = cell.RowID
 				}
+				return Row{
+					RowID:  cell.RowID,
+					Record: record,
+				}, nil
 			}
-			// If we've searched the whole leaf page and not found it.
-			return Row{}, ErrNotFound
+			return Row{}, ErrNotFound // Not found on this leaf page.
 
 		case PageTypeInteriorTable:
-			// It's an interior page, find the next page to visit.
-			foundChild := false
-			for _, cell := range page.InteriorCells {
-				if rowID <= cell.Key {
-					pageNum = int(cell.LeftChildPageNum)
-					foundChild = true
-					break
-				}
-			}
-			if !foundChild {
+			// It's an interior page. The cells are sorted by key, so we can binary search
+			// to find the correct child page to descend into.
+			i := sort.Search(len(page.InteriorCells), func(i int) bool {
+				return rowID <= page.InteriorCells[i].Key
+			})
+
+			if i < len(page.InteriorCells) {
+				pageNum = int(page.InteriorCells[i].LeftChildPageNum)
+			} else {
+				// The rowID is greater than all keys in the cells, so go to the right-most child.
 				pageNum = int(page.RightMostPtr)
 			}
 		default:
@@ -114,17 +118,18 @@ func (db *Database) FindInIndex(index IndexInfo, key Record) (int64, error) {
 
 		switch page.Type {
 		case PageTypeLeafIndex:
-			// We've reached a leaf page, search for the key here.
-			for _, cell := range page.LeafIndexCells {
-				// The key we are searching for is a prefix of the cell's payload.
-				// e.g., key is ('some_name'), payload is ('some_name', rowid)
-				if len(cell.Payload) != len(key)+1 {
-					continue // A perfect match requires the payload to have exactly one more element (the rowid).
-				}
+			// We've reached a leaf page. The cells are sorted by payload, so we can binary search.
+			i := sort.Search(len(page.LeafIndexCells), func(i int) bool {
+				// We are looking for the first record that is >= our key.
+				// The cell payload is (key_values..., rowid). We only compare the key part.
+				// This is safe because a valid index payload will always be longer than the key.
+				return CompareRecords(page.LeafIndexCells[i].Payload[:len(key)], key) >= 0
+			})
 
-				payloadPrefix := cell.Payload[:len(key)]
-				if CompareRecords(key, payloadPrefix) == 0 {
-					// Found a match. The rowid is the last element in the payload.
+			if i < len(page.LeafIndexCells) {
+				cell := page.LeafIndexCells[i]
+				// Check if it's an exact match.
+				if len(cell.Payload) == len(key)+1 && CompareRecords(cell.Payload[:len(key)], key) == 0 {
 					rowid, ok := cell.Payload[len(cell.Payload)-1].(int64)
 					if !ok {
 						return 0, fmt.Errorf("malformed index record: rowid is not an integer")
@@ -132,21 +137,19 @@ func (db *Database) FindInIndex(index IndexInfo, key Record) (int64, error) {
 					return rowid, nil
 				}
 			}
-			return 0, ErrNotFound
+			return 0, ErrNotFound // Not found on this leaf page.
 
 		case PageTypeInteriorIndex:
-			// It's an interior page, find the next page to visit.
-			// A binary search here would be more efficient than a linear scan.
-			foundChild := false
-			for _, cell := range page.InteriorIndexCells {
-				// If our key is less than or equal to the cell's key, descend to its child.
-				if CompareRecords(key, cell.Payload) <= 0 {
-					pageNum = int(cell.LeftChildPageNum)
-					foundChild = true
-					break
-				}
-			}
-			if !foundChild {
+			// It's an interior page. The cells are sorted by payload, so we can binary search
+			// to find the correct child page to descend into.
+			i := sort.Search(len(page.InteriorIndexCells), func(i int) bool {
+				// Find the first cell whose key is >= our search key.
+				return CompareRecords(key, page.InteriorIndexCells[i].Payload) <= 0
+			})
+
+			if i < len(page.InteriorIndexCells) {
+				pageNum = int(page.InteriorIndexCells[i].LeftChildPageNum)
+			} else {
 				// If key is greater than all keys in the cells, go to the right-most child.
 				pageNum = int(page.RightMostPtr)
 			}
