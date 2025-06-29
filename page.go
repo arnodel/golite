@@ -31,18 +31,35 @@ type InteriorTableCell struct {
 	Key              int64
 }
 
+// LeafIndexCell represents a cell in a leaf index page (type 0x0a).
+// It contains a record payload that maps indexed values to a rowid.
+// The payload record's format is (indexed_col_1, ..., indexed_col_N, rowid).
+type LeafIndexCell struct {
+	PayloadSize int64
+	Payload     Record
+}
+
+// InteriorIndexCell represents a cell in an interior index page (type 0x02).
+// It points to a child page and contains a separator key record.
+type InteriorIndexCell struct {
+	LeftChildPageNum uint32
+	Payload          Record
+}
+
 // Page represents a single page from the SQLite database file.
 type Page struct {
-	Type          byte
-	Freeblock     uint16
-	CellCount     uint16
-	CellContent   uint16
-	Fragmented    byte
-	RightMostPtr  uint32
-	CellPointers  []uint16
-	LeafCells     []LeafTableCell
-	InteriorCells []InteriorTableCell
-	RawData       []byte
+	Type               byte
+	Freeblock          uint16
+	CellCount          uint16
+	CellContent        uint16
+	Fragmented         byte
+	RightMostPtr       uint32
+	CellPointers       []uint16
+	LeafCells          []LeafTableCell
+	InteriorCells      []InteriorTableCell
+	LeafIndexCells     []LeafIndexCell
+	InteriorIndexCells []InteriorIndexCell
+	RawData            []byte
 }
 
 // ParsePage reads a raw byte slice and parses it into a Page struct.
@@ -111,8 +128,37 @@ func ParsePage(data []byte, pageNum int) (*Page, error) {
 				Key:              key,
 			}
 		}
-	case PageTypeLeafIndex, PageTypeInteriorIndex:
-		// Index pages are not yet supported.
+	case PageTypeLeafIndex:
+		p.LeafIndexCells = make([]LeafIndexCell, p.CellCount)
+		for i, cellOffset := range p.CellPointers {
+			cellData := data[int(cellOffset):]
+			payloadSize, n := readVarint(cellData)
+			payload := cellData[n : n+int(payloadSize)]
+			record, err := ParseRecord(payload)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse record in leaf index cell %d on page %d: %w", i, pageNum, err)
+			}
+			p.LeafIndexCells[i] = LeafIndexCell{
+				PayloadSize: payloadSize,
+				Payload:     record,
+			}
+		}
+	case PageTypeInteriorIndex:
+		p.InteriorIndexCells = make([]InteriorIndexCell, p.CellCount)
+		for i, cellOffset := range p.CellPointers {
+			cellData := data[int(cellOffset):]
+			leftChildPageNum := binary.BigEndian.Uint32(cellData[0:4])
+			payloadSize, n := readVarint(cellData[4:])
+			payload := cellData[4+n : 4+n+int(payloadSize)]
+			record, err := ParseRecord(payload)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse record in interior index cell %d on page %d: %w", i, pageNum, err)
+			}
+			p.InteriorIndexCells[i] = InteriorIndexCell{
+				LeftChildPageNum: leftChildPageNum,
+				Payload:          record,
+			}
+		}
 	}
 
 	return p, nil

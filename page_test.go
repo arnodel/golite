@@ -123,6 +123,49 @@ func TestParseInteriorPage(t *testing.T) {
 	}
 }
 
+func TestParseIndexPage(t *testing.T) {
+	dbPath := createTestDB(t, "index_page_test.sqlite")
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() failed with error: %v", err)
+	}
+	defer db.Close()
+
+	// Get the schema to find the root page of our index.
+	schema, err := db.GetSchema()
+	if err != nil {
+		t.Fatalf("GetSchema() failed: %v", err)
+	}
+	indexInfo, ok := schema.Indexes["idx_name"]
+	if !ok {
+		t.Fatalf("schema did not contain 'idx_name' index")
+	}
+
+	// The root of this index should be an interior index page because we have 500 rows.
+	rootPage, err := db.ReadPage(indexInfo.RootPage)
+	if err != nil {
+		t.Fatalf("ReadPage(%d) for index root failed: %v", indexInfo.RootPage, err)
+	}
+
+	if rootPage.Type != PageTypeInteriorIndex {
+		t.Errorf("expected page %d to be an interior index page (0x02), but got 0x%02x", indexInfo.RootPage, rootPage.Type)
+	}
+
+	if rootPage.CellCount == 0 {
+		t.Fatal("expected interior index page to have cells, but it was empty")
+	}
+
+	// Let's descend to the first leaf page.
+	leafPageNum := rootPage.InteriorIndexCells[0].LeftChildPageNum
+	leafPage, err := db.ReadPage(int(leafPageNum))
+	if err != nil {
+		t.Fatalf("ReadPage(%d) for index leaf failed: %v", leafPageNum, err)
+	}
+	if leafPage.Type != PageTypeLeafIndex {
+		t.Errorf("expected page %d to be a leaf index page (0x0a), but got 0x%02x", leafPageNum, leafPage.Type)
+	}
+}
+
 func TestReadVarint(t *testing.T) {
 	testCases := []struct {
 		name    string
