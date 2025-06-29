@@ -32,8 +32,8 @@ This roadmap outlines the planned development steps to reach version 1.0.
 -   [x] **2. Navigate B-Tree Pages:** Implement the core logic for reading pages and navigating the B-tree data structure that SQLite uses for tables and indexes.
 -   [x] **3. Read Schema Table:** Use the B-tree logic to find and parse the `sqlite_schema` table, which contains the definitions for all other tables, indexes, and views.
 -   [x] **4. Read Table Records:** Implement logic to parse raw record data from table pages into structured Go types.
--   [ ] **5. Implement Query Primitives:** Develop a simple, programmatic API for filtering records (e.g., `WHERE`-like functionality).
--   [ ] **Future: Joins:** Explore implementing logic for joining data between tables.
+-   [x] **5. Implement Query Primitives:** The project has adopted an iterator-based execution model. The core data access primitives (`TableScan`, `TableSeek`, `IndexSeek`, `IndexScan`) and the `Filter` primitive are now implemented.
+-   [ ] **Future: More Primitives:** Implement additional execution primitives like `Project` and `MergeJoin`.
 
 ## TODO / Known Limitations
 
@@ -41,6 +41,7 @@ This section tracks specific items that are known to be incomplete or require mo
 
 -   [ ] **Robust SQL Parser:** The schema parser has been improved to extract column names and types from `CREATE TABLE` statements. However, it is still a simplified implementation and may not handle all complex SQL syntax (e.g., constraints with nested parentheses, unusual type definitions).
 -   [ ] **Full Schema Parsing:** The `GetSchema()` function currently only parses `table` and `index` entries from the `sqlite_schema` table. It should be extended to handle other schema objects like `trigger` and `view`.
+-   [ ] **Index Schema Parsing:** The DDL parser can handle `CREATE TABLE` but not `CREATE INDEX`. This means we don't yet know which columns an index covers just from the schema.
 
 ## Installation
 
