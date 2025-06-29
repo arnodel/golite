@@ -15,6 +15,12 @@ var SQLNull = NullType{}
 // Record represents a single row of data, as a slice of Values.
 type Record []any
 
+// Row represents a single row of data, including its rowid.
+type Row struct {
+	RowID  int64
+	Record Record
+}
+
 // ParseRecord parses a raw byte slice from a cell's payload into a Record.
 func ParseRecord(data []byte) (Record, error) {
 	headerSize, n := readVarint(data)

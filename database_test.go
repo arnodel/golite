@@ -26,11 +26,16 @@ func TestDatabase_Find(t *testing.T) {
 	t.Run("find existing record", func(t *testing.T) {
 		// We inserted 500 rows, let's find one in the middle.
 		targetRowID := int64(250)
-		record, err := db.Find(testTable, targetRowID)
+		row, err := db.Find(testTable, targetRowID)
 		if err != nil {
 			t.Fatalf("Find() returned an unexpected error: %v", err)
 		}
 
+		if row.RowID != targetRowID {
+			t.Errorf("expected rowID to be %d, got %d", targetRowID, row.RowID)
+		}
+
+		record := row.Record
 		if len(record) != 2 {
 			t.Fatalf("expected record to have 2 columns, got %d", len(record))
 		}
@@ -79,11 +84,11 @@ func TestDatabase_Scan(t *testing.T) {
 
 	t.Run("full table scan", func(t *testing.T) {
 		var count int
-		for record, err := range db.Scan(testTable) {
+		for row, err := range db.Scan(testTable) {
 			if err != nil {
 				t.Fatalf("Scan returned an unexpected error: %v", err)
 			}
-			if record == nil {
+			if row.Record == nil {
 				t.Fatal("Scan returned nil record and nil error")
 			}
 			count++

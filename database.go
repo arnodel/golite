@@ -57,12 +57,12 @@ func (db *Database) ReadPage(pageNum int) (*Page, error) {
 }
 
 // Find searches for a record with a specific rowID within a table's B-Tree.
-func (db *Database) Find(table TableInfo, rowID int64) (Record, error) {
+func (db *Database) Find(table TableInfo, rowID int64) (Row, error) {
 	pageNum := table.RootPage
 	for {
 		page, err := db.ReadPage(pageNum)
 		if err != nil {
-			return nil, err
+			return Row{}, err
 		}
 
 		switch page.Type {
@@ -74,11 +74,14 @@ func (db *Database) Find(table TableInfo, rowID int64) (Record, error) {
 					if table.RowIDColumnIndex != -1 && len(record) > table.RowIDColumnIndex {
 						record[table.RowIDColumnIndex] = cell.RowID
 					}
-					return record, nil
+					return Row{
+						RowID:  cell.RowID,
+						Record: record,
+					}, nil
 				}
 			}
 			// If we've searched the whole leaf page and not found it.
-			return nil, ErrNotFound
+			return Row{}, ErrNotFound
 
 		case PageTypeInteriorTable:
 			// It's an interior page, find the next page to visit.
@@ -94,7 +97,7 @@ func (db *Database) Find(table TableInfo, rowID int64) (Record, error) {
 				pageNum = int(page.RightMostPtr)
 			}
 		default:
-			return nil, fmt.Errorf("unexpected page type %02x encountered during search", page.Type)
+			return Row{}, fmt.Errorf("unexpected page type %02x encountered during search", page.Type)
 		}
 	}
 }
@@ -102,18 +105,18 @@ func (db *Database) Find(table TableInfo, rowID int64) (Record, error) {
 // Scan returns an iterator over all records in a table.
 // The iterator can be used with a for...range loop.
 // Note: This API requires Go 1.22+ with GOEXPERIMENT=rangefunc, or Go 1.23+.
-func (db *Database) Scan(table TableInfo) iter.Seq2[Record, error] {
-	return func(yield func(Record, error) bool) {
+func (db *Database) Scan(table TableInfo) iter.Seq2[Row, error] {
+	return func(yield func(Row, error) bool) {
 		db.scanPage(table.RootPage, table, yield)
 	}
 }
 
 // scanPage is the recursive helper for Scan. It traverses the B-Tree in-order.
 // It returns true to continue scanning, or false to stop.
-func (db *Database) scanPage(pageNum int, table TableInfo, yield func(Record, error) bool) bool {
+func (db *Database) scanPage(pageNum int, table TableInfo, yield func(Row, error) bool) bool {
 	page, err := db.ReadPage(pageNum)
 	if err != nil {
-		return yield(nil, err)
+		return yield(Row{}, err)
 	}
 
 	switch page.Type {
@@ -123,7 +126,11 @@ func (db *Database) scanPage(pageNum int, table TableInfo, yield func(Record, er
 			if table.RowIDColumnIndex != -1 && len(record) > table.RowIDColumnIndex {
 				record[table.RowIDColumnIndex] = cell.RowID
 			}
-			if !yield(record, nil) {
+			row := Row{
+				RowID:  cell.RowID,
+				Record: record,
+			}
+			if !yield(row, nil) {
 				return false // Stop scan
 			}
 		}
@@ -137,7 +144,7 @@ func (db *Database) scanPage(pageNum int, table TableInfo, yield func(Record, er
 		}
 		return db.scanPage(int(page.RightMostPtr), table, yield)
 	default:
-		return yield(nil, fmt.Errorf("unexpected page type %02x encountered during scan", page.Type))
+		return yield(Row{}, fmt.Errorf("unexpected page type %02x encountered during scan", page.Type))
 	}
 }
 
@@ -159,11 +166,12 @@ func (db *Database) GetSchema() (*Schema, error) {
 	}
 	schema.Tables[schemaTableInfo.Name] = schemaTableInfo
 
-	for record, err := range db.Scan(schemaTableInfo) {
+	for row, err := range db.Scan(schemaTableInfo) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan schema table: %w", err)
 		}
 
+		record := row.Record
 		// Schema table format: type, name, tbl_name, rootpage, sql
 		if len(record) < 5 {
 			return nil, fmt.Errorf("malformed schema record: expected at least 5 columns, got %d", len(record))
